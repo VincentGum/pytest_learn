@@ -339,6 +339,453 @@ def api_version(pytestconfig):
     return pytestconfig.getoption("--api-version")
 ```
 
+#### 实际业务场景Demo
+
+##### Demo 1: 环境配置管理插件
+
+适用于多环境测试场景，自动根据环境切换配置，管理环境变量和测试参数。
+
+```python
+# common/plugins/env_manager.py
+import os
+import json
+import pytest
+from typing import Dict, Any
+
+class EnvManagerPlugin:
+    """环境配置管理插件"""
+    def __init__(self):
+        self.env_config = {}
+        self.current_env = "dev"
+    
+    def load_env_config(self, env_name: str) -> Dict[str, Any]:
+        """加载指定环境的配置"""
+        config_path = os.path.join("config", f"{env_name}.json")
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                return json.load(f)
+        return {}
+
+def pytest_addoption(parser):
+    """添加环境选择命令行参数"""
+    parser.addoption("--env", action="store", default="dev",
+                     help="指定测试环境: dev, staging, prod")
+    parser.addoption("--debug", action="store_true", default=False,
+                     help="启用调试模式")
+
+def pytest_configure(config):
+    """初始化环境管理器插件"""
+    env_manager = EnvManagerPlugin()
+    env_name = config.getoption("--env")
+    env_manager.current_env = env_name
+    env_manager.env_config = env_manager.load_env_config(env_name)
+    config._env_manager = env_manager
+    
+    # 根据环境设置全局变量
+    os.environ["TEST_ENV"] = env_name
+    if config.getoption("--debug"):
+        os.environ["DEBUG_MODE"] = "1"
+
+@pytest.fixture(scope="session")
+def env_config(pytestconfig) -> Dict[str, Any]:
+    """提供当前环境配置的fixture"""
+    return pytestconfig._env_manager.env_config
+
+@pytest.fixture(scope="session")
+def current_env(pytestconfig) -> str:
+    """提供当前环境名称的fixture"""
+    return pytestconfig._env_manager.current_env
+
+@pytest.fixture(scope="function")
+def api_client(env_config, current_env):
+    """根据环境提供API客户端"""
+    base_url = env_config.get("api_base_url", "http://localhost:8000")
+    # 这里可以初始化实际的API客户端
+    class MockApiClient:
+        def __init__(self, url, env):
+            self.base_url = url
+            self.env = env
+        
+        def get(self, endpoint):
+            print(f"[{self.env}] GET {self.base_url}/{endpoint}")
+            return {"status": "success", "env": self.env}
+    
+    return MockApiClient(base_url, current_env)
+```
+
+使用示例：
+```python
+# 运行指定环境的测试
+# pytest --env staging tests/
+
+def test_api_in_staging(api_client, current_env):
+    assert current_env == "staging"
+    response = api_client.get("users")
+    assert response["env"] == "staging"
+```
+
+##### Demo 2: 测试数据生成与清理插件
+
+适用于需要大量测试数据的场景，自动生成和清理测试数据，支持数据库、文件系统等多种数据源。
+
+```python
+# common/plugins/data_manager.py
+import pytest
+import os
+import shutil
+from datetime import datetime
+from typing import List, Dict, Any
+
+class DataManagerPlugin:
+    """测试数据管理插件"""
+    def __init__(self):
+        self.created_resources = []
+        self.test_start_time = None
+    
+    def register_resource(self, resource_type: str, resource_id: Any):
+        """注册创建的资源以便后续清理"""
+        self.created_resources.append((resource_type, resource_id))
+    
+    def cleanup_resources(self):
+        """清理所有注册的资源"""
+        print(f"\n开始清理 {len(self.created_resources)} 个资源...")
+        for resource_type, resource_id in self.created_resources:
+            print(f"  清理 {resource_type}: {resource_id}")
+            # 这里可以根据资源类型执行不同的清理逻辑
+        self.created_resources.clear()
+
+def pytest_sessionstart(session):
+    """会话开始时初始化数据管理器"""
+    data_manager = DataManagerPlugin()
+    data_manager.test_start_time = datetime.now()
+    session.config._data_manager = data_manager
+    
+    # 创建临时数据目录
+    os.makedirs("temp_data", exist_ok=True)
+
+def pytest_sessionfinish(session, exitstatus):
+    """会话结束时清理数据"""
+    if hasattr(session.config, "_data_manager"):
+        session.config._data_manager.cleanup_resources()
+        
+        # 清理临时数据目录
+        if os.path.exists("temp_data"):
+            shutil.rmtree("temp_data")
+        
+        # 打印数据使用统计
+        duration = datetime.now() - session.config._data_manager.test_start_time
+        print(f"\n测试数据管理统计:")
+        print(f"  总耗时: {duration.total_seconds():.2f} 秒")
+
+@pytest.fixture(scope="session")
+def data_manager(pytestconfig):
+    """提供数据管理器的fixture"""
+    return pytestconfig._data_manager
+
+@pytest.fixture
+def test_user(data_manager):
+    """生成测试用户并自动清理"""
+    # 实际项目中这里可以调用API或数据库创建用户
+    user_id = f"test_user_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    user_data = {
+        "id": user_id,
+        "username": f"user_{user_id}",
+        "email": f"{user_id}@example.com"
+    }
+    
+    # 注册资源以便后续清理
+    data_manager.register_resource("user", user_id)
+    
+    yield user_data
+    
+    # fixture teardown - 这里也可以直接执行清理逻辑
+    # 但使用data_manager统一管理更优雅
+```
+
+使用示例：
+```python
+def test_user_operations(test_user, data_manager):
+    # 使用自动生成的测试用户
+    assert test_user["username"].startswith("user_")
+    
+    # 手动创建额外资源
+    product_id = "test_product_123"
+    data_manager.register_resource("product", product_id)
+    
+    # 测试逻辑...
+    # 测试结束后，test_user和product_id都会被自动清理
+```
+
+##### Demo 3: 智能重试与报告增强插件
+
+适用于不稳定测试场景，智能识别和重试失败的测试，并增强测试报告。
+
+```python
+# common/plugins/smart_retry.py
+import pytest
+import time
+import json
+import os
+from typing import Dict, List, Optional
+
+class SmartRetryPlugin:
+    """智能重试插件"""
+    def __init__(self):
+        self.retry_history = []
+        self.flaky_tests = set()
+        self.max_retries = 3
+    
+    def record_retry(self, item, attempt, outcome):
+        """记录重试历史"""
+        self.retry_history.append({
+            "test_name": item.nodeid,
+            "attempt": attempt,
+            "outcome": outcome,
+            "timestamp": time.time()
+        })
+        
+        # 识别不稳定测试
+        if attempt > 0 and outcome == "passed":
+            self.flaky_tests.add(item.nodeid)
+    
+    def get_report_data(self) -> Dict:
+        """获取报告数据"""
+        return {
+            "total_retries": len(self.retry_history),
+            "flaky_tests": list(self.flaky_tests),
+            "retry_history": self.retry_history
+        }
+
+def pytest_addoption(parser):
+    """添加重试相关参数"""
+    parser.addoption("--max-retries", action="store", default="3", type=int,
+                     help="最大重试次数")
+    parser.addoption("--retry-delay", action="store", default="1", type=int,
+                     help="重试间隔（秒）")
+    parser.addoption("--generate-retry-report", action="store_true",
+                     help="生成重试报告")
+
+def pytest_configure(config):
+    """初始化智能重试插件"""
+    retry_plugin = SmartRetryPlugin()
+    retry_plugin.max_retries = config.getoption("--max-retries")
+    config._retry_plugin = retry_plugin
+    
+    # 注册标记
+    config.addinivalue_line("markers", "retry: 启用重试的测试")
+    config.addinivalue_line("markers", "flaky: 已知不稳定的测试")
+
+def pytest_runtest_protocol(item, nextitem):
+    """自定义测试执行协议，添加重试逻辑"""
+    # 检查是否需要重试
+    retry_marker = item.get_closest_marker("retry")
+    flaky_marker = item.get_closest_marker("flaky")
+    
+    if not (retry_marker or flaky_marker):
+        return  # 使用默认执行流程
+    
+    max_retries = item.config._retry_plugin.max_retries
+    retry_delay = item.config.getoption("--retry-delay")
+    
+    for attempt in range(max_retries + 1):  # +1 表示首次尝试
+        print(f"测试 {item.nodeid} (尝试 {attempt + 1}/{max_retries + 1})")
+        
+        # 执行测试
+        try:
+            for when in ("setup", "call", "teardown"):
+                item.ihook.pytest_runtest_setup(item=item)
+                if when == "call":
+                    item.ihook.pytest_runtest_call(item=item)
+                item.ihook.pytest_runtest_teardown(item=item, nextitem=nextitem)
+            
+            # 测试通过
+            item.config._retry_plugin.record_retry(item, attempt, "passed")
+            return True
+        except Exception:
+            # 测试失败，准备重试
+            item.config._retry_plugin.record_retry(item, attempt, "failed")
+            if attempt < max_retries:
+                print(f"测试失败，将在 {retry_delay} 秒后重试...")
+                time.sleep(retry_delay)
+            else:
+                print(f"已达到最大重试次数 {max_retries}")
+                raise  # 最后一次尝试仍然失败，抛出异常
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """在终端报告中添加重试统计"""
+    if hasattr(config, "_retry_plugin"):
+        report_data = config._retry_plugin.get_report_data()
+        
+        terminalreporter.write_sep("=", "智能重试报告")
+        terminalreporter.write_line(f"总重试次数: {report_data['total_retries']}")
+        terminalreporter.write_line(f"不稳定测试数: {len(report_data['flaky_tests'])}")
+        
+        if report_data['flaky_tests']:
+            terminalreporter.write_line("\n不稳定测试列表:")
+            for test in report_data['flaky_tests']:
+                terminalreporter.write_line(f"  - {test}")
+        
+        # 生成JSON报告
+        if config.getoption("--generate-retry-report"):
+            with open("retry_report.json", "w") as f:
+                json.dump(report_data, f, indent=2)
+            terminalreporter.write_line("\n重试报告已保存到: retry_report.json")
+```
+
+使用示例：
+```python
+@pytest.mark.retry  # 启用重试
+@pytest.mark.flaky  # 标记为已知不稳定
+@pytest.mark.parametrize("attempt", range(3))
+def test_unstable_api(attempt):
+    # 模拟不稳定的测试，有时会失败
+    import random
+    if random.random() < 0.5:
+        assert True
+    else:
+        assert False, "随机失败"
+```
+
+##### Demo 4: 分布式测试协调插件
+
+适用于大规模测试场景，协调多节点分布式测试执行，实现测试分片和资源分配。
+
+```python
+# common/plugins/distributed_test.py
+import pytest
+import socket
+import hashlib
+from typing import List, Dict, Any
+
+class DistributedTestPlugin:
+    """分布式测试协调插件"""
+    def __init__(self):
+        self.node_id = self._generate_node_id()
+        self.total_nodes = 1
+        self.node_index = 0
+        self.selected_tests = []
+        self.skipped_tests = []
+    
+    def _generate_node_id(self) -> str:
+        """生成唯一的节点ID"""
+        hostname = socket.gethostname()
+        return hashlib.md5(hostname.encode()).hexdigest()[:8]
+    
+    def should_run_test(self, test_name: str) -> bool:
+        """决定是否在当前节点运行指定测试"""
+        if self.total_nodes <= 1:
+            return True
+        
+        # 使用测试名的哈希值决定分片
+        test_hash = int(hashlib.md5(test_name.encode()).hexdigest(), 16)
+        return test_hash % self.total_nodes == self.node_index
+
+def pytest_addoption(parser):
+    """添加分布式测试相关参数"""
+    parser.addoption("--node-index", action="store", default="0", type=int,
+                     help="当前节点索引（从0开始）")
+    parser.addoption("--total-nodes", action="store", default="1", type=int,
+                     help="总节点数")
+    parser.addoption("--distributed-mode", action="store_true",
+                     help="启用分布式测试模式")
+
+def pytest_configure(config):
+    """初始化分布式测试插件"""
+    if config.getoption("--distributed-mode"):
+        dist_plugin = DistributedTestPlugin()
+        dist_plugin.node_index = config.getoption("--node-index")
+        dist_plugin.total_nodes = config.getoption("--total-nodes")
+        config._dist_plugin = dist_plugin
+        
+        print(f"\n分布式测试模式已启用:")
+        print(f"  节点ID: {dist_plugin.node_id}")
+        print(f"  节点索引: {dist_plugin.node_index}/{dist_plugin.total_nodes - 1}")
+
+def pytest_collection_modifyitems(config, items):
+    """根据节点索引过滤测试项"""
+    if not hasattr(config, "_dist_plugin"):
+        return
+    
+    dist_plugin = config._dist_plugin
+    original_count = len(items)
+    
+    # 过滤测试项
+    filtered_items = []
+    for item in items:
+        if dist_plugin.should_run_test(item.nodeid):
+            dist_plugin.selected_tests.append(item.nodeid)
+            filtered_items.append(item)
+        else:
+            dist_plugin.skipped_tests.append(item.nodeid)
+    
+    items[:] = filtered_items
+    
+    print(f"测试分片结果:")
+    print(f"  总测试数: {original_count}")
+    print(f"  本节点执行: {len(filtered_items)}")
+    print(f"  跳过测试: {original_count - len(filtered_items)}")
+
+@pytest.fixture(scope="session")
+def distributed_info(pytestconfig) -> Dict[str, Any]:
+    """提供分布式测试信息的fixture"""
+    if hasattr(pytestconfig, "_dist_plugin"):
+        plugin = pytestconfig._dist_plugin
+        return {
+            "node_id": plugin.node_id,
+            "node_index": plugin.node_index,
+            "total_nodes": plugin.total_nodes,
+            "is_distributed": True
+        }
+    else:
+        return {
+            "node_id": "single-node",
+            "node_index": 0,
+            "total_nodes": 1,
+            "is_distributed": False
+        }
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """添加分布式测试统计到报告"""
+    if hasattr(config, "_dist_plugin"):
+        dist_plugin = config._dist_plugin
+        terminalreporter.write_sep("=", "分布式测试报告")
+        terminalreporter.write_line(f"节点信息: {dist_plugin.node_id} (索引 {dist_plugin.node_index}/{dist_plugin.total_nodes - 1})")
+        terminalreporter.write_line(f"执行测试数: {len(dist_plugin.selected_tests)}")
+        terminalreporter.write_line(f"跳过测试数: {len(dist_plugin.skipped_tests)}")
+```
+
+使用示例：
+```bash
+# 在多节点上分布式执行测试
+# 节点0: pytest --distributed-mode --node-index 0 --total-nodes 3 tests/
+# 节点1: pytest --distributed-mode --node-index 1 --total-nodes 3 tests/
+# 节点2: pytest --distributed-mode --node-index 2 --total-nodes 3 tests/
+```
+
+```python
+def test_with_distributed_info(distributed_info):
+    """测试中可以获取分布式信息"""
+    if distributed_info["is_distributed"]:
+        print(f"运行在分布式模式: 节点 {distributed_info['node_index']}/{distributed_info['total_nodes'] - 1}")
+    else:
+        print("运行在单节点模式")
+    
+    # 可以根据节点索引执行特定操作
+    # 例如，节点0可以执行数据准备工作
+    if distributed_info["node_index"] == 0:
+        print("作为主节点执行初始化任务")
+```
+
+#### 插件最佳实践
+
+1. **单一职责原则**：每个插件专注于一个功能领域
+2. **配置外部化**：通过命令行参数和配置文件提供灵活性
+3. **资源管理**：正确处理资源的创建和清理
+4. **错误处理**：提供友好的错误信息和恢复机制
+5. **性能考虑**：避免在关键路径上执行耗时操作
+6. **文档完善**：为插件功能和使用方法提供清晰文档
+7. **测试插件**：为插件本身编写单元测试
+
 ## 2. 测试分层策略
 
 ### 2.1 分层测试结构
