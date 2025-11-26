@@ -100,7 +100,7 @@ pytest的生命周期包含多个阶段，每个阶段都有对应的Hook函数�
 
 适用于多环境测试场景，根据不同环境自动调整测试执行策略和资源分配。
 
-**实现文件**：[examples/hooks/env_aware_execution.py](https://github.com/bytedance/pytest_demo/blob/main/examples/hooks/env_aware_execution.py)
+**实现文件**：[examples/hooks/env_aware_execution.py](https://github.com/VincentGum/pytest_learn/blob/main/examples/hooks/env_aware_execution.py)
 
 **主要功能**：
 - 环境配置映射（开发/预发/生产）
@@ -120,7 +120,7 @@ def test_feature_on_staging(browser, base_url):
 
 适用于需要管理外部资源的测试场景，确保测试前资源就绪，测试后资源清理。
 
-**实现文件**：[examples/hooks/resource_management.py](https://github.com/bytedance/pytest_demo/blob/main/examples/hooks/resource_management.py)
+**实现文件**：[examples/hooks/resource_management.py](https://github.com/VincentGum/pytest_learn/blob/main/examples/hooks/resource_management.py)
 
 **主要功能**：
 - 资源生命周期管理（初始化、使用、清理）
@@ -140,7 +140,7 @@ def test_database_operations(db_connection):
 
 适用于需要定制测试报告格式和内容的场景，收集额外的测试元数据和统计信息。
 
-**实现文件**：[examples/hooks/custom_reporting.py](https://github.com/bytedance/pytest_demo/blob/main/examples/hooks/custom_reporting.py)
+**实现文件**：[examples/hooks/custom_reporting.py](https://github.com/VincentGum/pytest_learn/blob/main/examples/hooks/custom_reporting.py)
 
 **主要功能**：
 - 测试结果收集与统计（通过/失败/跳过）
@@ -162,7 +162,7 @@ def test_with_custom_metadata():
 
 适用于需要从外部数据源动态生成测试用例的场景，支持灵活的参数化测试。
 
-**实现文件**：[examples/hooks/dynamic_test_generation.py](https://github.com/bytedance/pytest_demo/blob/main/examples/hooks/dynamic_test_generation.py)
+**实现文件**：[examples/hooks/dynamic_test_generation.py](https://github.com/VincentGum/pytest_learn/blob/main/examples/hooks/dynamic_test_generation.py)
 
 **主要功能**：
 - 多格式配置文件加载（JSON/YAML）
@@ -199,7 +199,7 @@ pytest_plugins = [
 
 **插件实现示例**：
 
-**实现文件**：[examples/plugins/basic_plugin.py](https://github.com/bytedance/pytest_demo/blob/main/examples/plugins/basic_plugin.py)
+**实现文件**：[examples/plugins/basic_plugin.py](https://github.com/VincentGum/pytest_learn/blob/main/examples/plugins/basic_plugin.py)
 
 **主要功能**：
 - 插件类定义与初始化
@@ -212,7 +212,7 @@ pytest_plugins = [
 
 适用于多环境测试场景，自动根据环境切换配置，管理环境变量和测试参数。
 
-**实现文件**：[examples/plugins/env_config_manager.py](https://github.com/bytedance/pytest_demo/blob/main/examples/plugins/env_config_manager.py)
+**实现文件**：[examples/plugins/env_config_manager.py](https://github.com/VincentGum/pytest_learn/blob/main/examples/plugins/env_config_manager.py)
 
 **主要功能**：
 - 多环境YAML配置文件加载
@@ -235,7 +235,7 @@ def test_api_in_staging(api_client, current_env):
 
 适用于需要大量测试数据的场景，自动生成和清理测试数据，支持数据库、文件系统等多种数据源。
 
-**实现文件**：[examples/plugins/test_data_manager.py](https://github.com/bytedance/pytest_demo/blob/main/examples/plugins/test_data_manager.py)
+**实现文件**：[examples/plugins/test_data_manager.py](https://github.com/VincentGum/pytest_learn/blob/main/examples/plugins/test_data_manager.py)
 
 **主要功能**：
 - 测试数据生命周期管理
@@ -260,7 +260,7 @@ def test_user_operations(test_user, data_manager):
 
 适用于不稳定测试场景，智能识别和重试失败的测试，并增强测试报告。
 
-**实现文件**：[examples/plugins/smart_retry.py](https://github.com/bytedance/pytest_demo/blob/main/examples/plugins/smart_retry.py)
+**实现文件**：[examples/plugins/smart_retry.py](https://github.com/VincentGum/pytest_learn/blob/main/examples/plugins/smart_retry.py)
 
 **主要功能**：
 - 自定义重试标记（@pytest.mark.retry, @pytest.mark.flaky）
@@ -282,7 +282,7 @@ def test_unstable_api():
 
 适用于大规模测试场景，协调多节点分布式测试执行，实现测试分片和资源分配。
 
-**实现文件**：[examples/plugins/distributed_testing.py](https://github.com/bytedance/pytest_demo/blob/main/examples/plugins/distributed_testing.py)
+**实现文件**：[examples/plugins/distributed_testing.py](https://github.com/VincentGum/pytest_learn/blob/main/examples/plugins/distributed_testing.py)
 
 **主要功能**：
 - 测试分片策略（哈希分片）
