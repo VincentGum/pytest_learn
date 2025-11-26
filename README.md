@@ -70,33 +70,33 @@ def temp_db(tmp_path):
 - 用户只需定义与Hook同名的函数，即可在对应阶段插入自定义逻辑
 - 多个插件或模块中可以定义同名Hook，pytest会按特定顺序执行它们
 
-## 生命周期钩子机制详解
+#### 生命周期钩子机制详解
 
 pytest的生命周期包含多个阶段，每个阶段都有对应的Hook函数，让用户能够精确控制测试流程的各个环节：
 
-### 1. 配置初始化阶段
+##### 1. 配置初始化阶段
 - **pytest_addoption(parser)**：添加自定义命令行参数
 - **pytest_addhooks(pluginmanager)**：注册自定义钩子
 - **pytest_configure(config)**：测试配置完成后执行，适合进行环境初始化
 
-### 2. 会话准备阶段
+##### 2. 会话准备阶段
 - **pytest_sessionstart(session)**：测试会话开始时执行，可用于准备共享资源
 - **pytest_collection_modifyitems(session, config, items)**：修改收集到的测试项
 - **pytest_generate_tests(metafunc)**：动态生成参数化测试
 
-### 3. 测试执行阶段
+##### 3. 测试执行阶段
 - **pytest_runtest_setup(item)**：每个测试用例执行前，适合前置条件检查
 - **pytest_runtest_call(item)**：执行测试函数本身
 - **pytest_runtest_teardown(item)**：每个测试用例执行后，适合清理资源
 - **pytest_runtest_logreport(report)**：生成测试报告时，可用于收集测试结果
 
-### 4. 会话结束阶段
+##### 4. 会话结束阶段
 - **pytest_sessionfinish(session, exitstatus)**：测试会话结束时执行，可用于清理全局资源
 - **pytest_terminal_summary(terminalreporter, exitstatus, config)**：生成终端摘要时，用于输出自定义统计信息
 
-## 实际业务场景Demo
+#### 实际业务场景Demo
 
-### Demo 1: 环境感知的测试执行控制
+##### Demo 1: 环境感知的测试执行控制
 
 ```python
 # conftest.py或插件中
@@ -133,7 +133,7 @@ def pytest_collection_modifyitems(config, items):
     items.sort(key=get_priority)
 ```
 
-### Demo 2: 测试前置条件检查与资源管理
+##### Demo 2: 测试前置条件检查与资源管理
 
 ```python
 def pytest_runtest_setup(item):
@@ -195,7 +195,7 @@ def pytest_sessionfinish(session, exitstatus):
     print(f"测试会话总时长: {duration:.2f}秒")
 ```
 
-### Demo 3: 自定义测试报告与结果统计
+##### Demo 3: 自定义测试报告与结果统计
 
 ```python
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
@@ -250,7 +250,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         terminalreporter.write_line("测试结果已导出到 test_results.json")
 ```
 
-### Demo 4: 动态测试生成与参数化
+##### Demo 4: 动态测试生成与参数化
 
 ```python
 def pytest_generate_tests(metafunc):
