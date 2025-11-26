@@ -63,32 +63,242 @@ def temp_db(tmp_path):
 
 ### 1.2 Hook（钩子）
 
-**定义**：Hook是pytest提供的扩展点，允许在测试执行的不同阶段插入自定义逻辑。
+**定义**：Hook是pytest提供的扩展点，允许在测试执行的不同阶段插入自定义逻辑。这是pytest高度可扩展性的核心机制。
 
-**常见钩子函数**：
-- `pytest_configure`：pytest配置时执行
-- `pytest_collection_modifyitems`：收集测试项后修改
-- `pytest_sessionstart`/`pytest_sessionfinish`：会话开始/结束时执行
-- `pytest_runtest_setup`/`pytest_runtest_teardown`：测试函数执行前/后
-- `pytest_generate_tests`：参数化测试生成
-- `pytest_addoption`：添加自定义命令行选项
+**工作原理**：
+- pytest在测试执行的特定阶段会自动查找并调用具有特定名称的函数
+- 用户只需定义与Hook同名的函数，即可在对应阶段插入自定义逻辑
+- 多个插件或模块中可以定义同名Hook，pytest会按特定顺序执行它们
 
-**示例**：
+## 生命周期钩子机制详解
+
+pytest的生命周期包含多个阶段，每个阶段都有对应的Hook函数，让用户能够精确控制测试流程的各个环节：
+
+### 1. 配置初始化阶段
+- **pytest_addoption(parser)**：添加自定义命令行参数
+- **pytest_addhooks(pluginmanager)**：注册自定义钩子
+- **pytest_configure(config)**：测试配置完成后执行，适合进行环境初始化
+
+### 2. 会话准备阶段
+- **pytest_sessionstart(session)**：测试会话开始时执行，可用于准备共享资源
+- **pytest_collection_modifyitems(session, config, items)**：修改收集到的测试项
+- **pytest_generate_tests(metafunc)**：动态生成参数化测试
+
+### 3. 测试执行阶段
+- **pytest_runtest_setup(item)**：每个测试用例执行前，适合前置条件检查
+- **pytest_runtest_call(item)**：执行测试函数本身
+- **pytest_runtest_teardown(item)**：每个测试用例执行后，适合清理资源
+- **pytest_runtest_logreport(report)**：生成测试报告时，可用于收集测试结果
+
+### 4. 会话结束阶段
+- **pytest_sessionfinish(session, exitstatus)**：测试会话结束时执行，可用于清理全局资源
+- **pytest_terminal_summary(terminalreporter, exitstatus, config)**：生成终端摘要时，用于输出自定义统计信息
+
+## 实际业务场景Demo
+
+### Demo 1: 环境感知的测试执行控制
+
 ```python
-# 自定义测试排序和过滤
+# conftest.py或插件中
 def pytest_collection_modifyitems(config, items):
-    """根据环境过滤测试并按标记排序"""
-    # 生产环境跳过慢测试
-    if config.getoption("--env") == "prod":
-        for item in items:
-            if "slow" in [m.name for m in item.iter_markers()]:
-                item.add_marker(pytest.mark.skip(reason="生产环境跳过慢测试"))
+    """根据环境自动跳过不适合的测试"""
+    # 获取当前环境
+    current_env = config.getoption("--env", default="dev")
     
-    # 按测试类型排序
-    items.sort(key=lambda x: ("unit" not in [m.name for m in x.iter_markers()],
-                            "contract" not in [m.name for m in x.iter_markers()],
-                            "integration" not in [m.name for m in x.iter_markers()],
-                            "e2e" not in [m.name for m in x.iter_markers()]))
+    # 生产环境跳过慢测试和不稳定测试
+    if current_env == "prod":
+        skipped = 0
+        for item in items:
+            # 检查标记
+            markers = [m.name for m in item.iter_markers()]
+            
+            # 跳过标记为slow或flaky的测试
+            if "slow" in markers or "flaky" in markers:
+                skip_reason = f"{current_env}环境跳过{'慢' if 'slow' in markers else '不稳定'}测试"
+                item.add_marker(pytest.mark.skip(reason=skip_reason))
+                skipped += 1
+        
+        if skipped > 0:
+            print(f"环境: {current_env}, 已跳过{skipped}个测试")
+    
+    # 按测试优先级排序
+    def get_priority(item):
+        markers = [m.name for m in item.iter_markers()]
+        if "unit" in markers: return 0
+        if "contract" in markers: return 1
+        if "integration" in markers: return 2
+        if "e2e" in markers: return 3
+        return 999
+    
+    items.sort(key=get_priority)
+```
+
+### Demo 2: 测试前置条件检查与资源管理
+
+```python
+def pytest_runtest_setup(item):
+    """执行测试前的前置条件检查"""
+    # 检查需要数据库的测试
+    if item.get_closest_marker("require_db"):
+        # 检查数据库连接是否可用
+        import os
+        if not os.environ.get("DB_CONNECTION_STRING"):
+            pytest.skip("数据库连接信息未配置")
+        
+        # 检查数据库是否可访问
+        try:
+            # 这里可以添加实际的数据库连接测试
+            test_db_connection()
+        except Exception as e:
+            pytest.skip(f"数据库连接失败: {str(e)}")
+    
+    # 检查需要特定API版本的测试
+    if item.get_closest_marker("api_version"):
+        marker = item.get_closest_marker("api_version")
+        required_version = marker.args[0]
+        current_version = get_current_api_version()
+        
+        if current_version != required_version:
+            pytest.skip(
+                f"需要API版本 {required_version}, 当前版本 {current_version}"
+            )
+
+def pytest_sessionstart(session):
+    """测试会话开始时初始化全局资源"""
+    print("初始化测试会话资源...")
+    # 创建资源池
+    session._resource_pool = {
+        "api_clients": {},
+        "temp_files": [],
+        "start_time": time.time()
+    }
+
+def pytest_sessionfinish(session, exitstatus):
+    """测试会话结束时清理全局资源"""
+    print("清理测试会话资源...")
+    # 关闭所有API客户端
+    for client in session._resource_pool["api_clients"].values():
+        try:
+            client.close()
+        except:
+            pass
+    
+    # 删除临时文件
+    for file_path in session._resource_pool["temp_files"]:
+        try:
+            os.unlink(file_path)
+        except:
+            pass
+    
+    # 计算测试会话时长
+    duration = time.time() - session._resource_pool["start_time"]
+    print(f"测试会话总时长: {duration:.2f}秒")
+```
+
+### Demo 3: 自定义测试报告与结果统计
+
+```python
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """生成自定义测试结果统计"""
+    # 获取测试统计信息
+    stats = terminalreporter.stats
+    
+    # 输出标准统计
+    terminalreporter.write_sep("=", "自定义测试统计")
+    
+    # 统计按标记分类的测试结果
+    marker_stats = {}
+    for status in stats:
+        for report in stats[status]:
+            if hasattr(report, "item"):
+                for marker in report.item.iter_markers():
+                    if marker.name not in marker_stats:
+                        marker_stats[marker.name] = {"passed": 0, "failed": 0, "skipped": 0}
+                    if status in marker_stats[marker.name]:
+                        marker_stats[marker.name][status] += 1
+    
+    # 输出按标记分类的统计
+    if marker_stats:
+        terminalreporter.write_line("按标记分类的测试结果:")
+        for marker, counts in marker_stats.items():
+            total = sum(counts.values())
+            terminalreporter.write_line(
+                f"  {marker}: 总测试数={total}, 通过={counts['passed']}, "
+                f"失败={counts['failed']}, 跳过={counts['skipped']}"
+            )
+    
+    # 计算平均测试时长
+    durations = [report.duration for status in stats 
+                for report in stats[status] if hasattr(report, "duration")]
+    if durations:
+        avg_duration = sum(durations) / len(durations)
+        max_duration = max(durations)
+        terminalreporter.write_line(
+            f"测试执行时长: 平均={avg_duration:.3f}s, 最长={max_duration:.3f}s"
+        )
+    
+    # 生成JSON格式报告（如果需要）
+    if config.getoption("--export-results"):
+        results = {
+            "summary": {k: len(v) for k, v in stats.items()},
+            "marker_stats": marker_stats,
+            "duration": sum(durations) if durations else 0,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        with open("test_results.json", "w") as f:
+            json.dump(results, f, indent=2)
+        terminalreporter.write_line("测试结果已导出到 test_results.json")
+```
+
+### Demo 4: 动态测试生成与参数化
+
+```python
+def pytest_generate_tests(metafunc):
+    """动态生成测试参数"""
+    # 为需要feature_flag参数的测试生成参数
+    if "feature_flag" in metafunc.fixturenames:
+        # 从环境配置中获取可用的特性标志
+        available_flags = get_available_feature_flags()
+        
+        # 为每个特性标志生成测试参数
+        metafunc.parametrize(
+            "feature_flag",
+            available_flags,
+            ids=[f"flag_{flag}" for flag in available_flags]
+        )
+    
+    # 为API测试生成版本参数
+    if "api_version" in metafunc.fixturenames and "endpoint" in metafunc.fixturenames:
+        # 获取支持的API版本
+        supported_versions = get_supported_api_versions()
+        
+        # 生成API版本和端点的组合
+        parametrize_data = []
+        ids = []
+        
+        for version in supported_versions:
+            endpoints = get_endpoints_for_version(version)
+            for endpoint in endpoints:
+                parametrize_data.append((version, endpoint))
+                ids.append(f"v{version}_{endpoint}")
+        
+        metafunc.parametrize(
+            "api_version,endpoint",
+            parametrize_data,
+            ids=ids
+        )
+
+# 配套的fixture定义
+@pytest.fixture
+def feature_flag(request):
+    """提供特性标志的fixture"""
+    flag = request.param
+    # 启用特性标志
+    enable_feature_flag(flag)
+    yield flag
+    # 测试结束后清理
+    disable_feature_flag(flag)
+
 ```
 
 ### 1.3 Plugin（插件）
